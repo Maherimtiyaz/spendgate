@@ -1,0 +1,109 @@
+# Publishes a release when a tag like v0.1.0 is pushed.
+#
+# Nothing here uses a long-lived secret. PyPI accepts the upload because the
+# workflow proves its identity with a short-lived OIDC token ("trusted
+# publishing"), and every artifact is signed with a Sigstore attestation that
+# ties it to this repository, this workflow and the tagged commit.
+#
+# One-time setup:
+#   1. On PyPI, add a trusted publisher for this repository with workflow
+#      "release.yml" and environment "pypi".
+#   2. In the repository settings, create an environment named "pypi"
+#      (add required reviewers there if releases should need approval).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install build twine
+      - run: python -m build
+      - name: Tag must match the package version
+        run: |
+          version=$(python -c "import glob,re; print(re.search(r'spendgate-(.+)\.tar\.gz', glob.glob('dist/*.tar.gz')[0]).group(1))")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != version $version"; exit 1; }
+      - run: twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  test:
+    # Test the built wheel, not the source tree: this is what users install.
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: spendgate
+          POSTGRES_PASSWORD: spendgate
+          POSTGRES_DB: spendgate_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U spendgate"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SPENDGATE_TEST_DSN: postgresql://spendgate:spendgate@localhost:5432/spendgate_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - run: pip install "$(ls dist/*.whl)[dev]"
+      - run: rm -rf src && pytest -q
+
+  publish:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC token for PyPI trusted publishing and signing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # Uploads with PEP 740 attestations, which PyPI shows on the file pages.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release
+      id-token: write      # sign the provenance attestation
+      attestations: write  # store it
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
