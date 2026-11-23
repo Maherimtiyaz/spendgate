@@ -256,6 +256,22 @@ class PostgresStore:
                         (amount, tenant, feature, win, period))
             conn.execute("DELETE FROM spendgate_reservations WHERE id = %s", (reservation_id,))
 
+    def extend(self, reservation_id: str, ttl_seconds: float) -> bool:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "UPDATE spendgate_reservations SET expires_at = %s "
+                "WHERE id = %s AND status = 'held' AND expires_at > %s RETURNING 1",
+                (self._clock() + ttl_seconds, reservation_id, self._clock())).fetchone()
+        return row is not None
+
+    def prune(self, older_than_seconds: float) -> int:
+        cutoff = self._clock() - older_than_seconds
+        with self._pool.connection() as conn:
+            return conn.execute(
+                "DELETE FROM spendgate_reservations WHERE "
+                "(status = 'settled' AND settled_at < %s) OR "
+                "(status = 'expired' AND expires_at < %s)", (cutoff, cutoff)).rowcount
+
     def sweep(self) -> int:
         """Expire overdue reservations for every tenant. Returns how many."""
         with self._pool.connection() as conn:
@@ -314,6 +330,21 @@ class PostgresStore:
                 "UPDATE spendgate_outbox SET delivered = %s, dead = %s, last_error = %s, "
                 "locked_until = 0, next_attempt_at = COALESCE(%s, next_attempt_at) WHERE id = %s",
                 (list(delivered), dead, error, retry_at, event_id))
+
+    def dead_events(self, limit: int = 100) -> list[tuple[OutboxItem, str | None]]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT id, payload, delivered, attempts, last_error FROM spendgate_outbox "
+                "WHERE dead ORDER BY seq LIMIT %s", (limit,)).fetchall()
+        return [(OutboxItem(id, payload, tuple(delivered), attempts), error)
+                for id, payload, delivered, attempts, error in rows]
+
+    def retry_dead(self, event_ids: list[str] | None = None) -> int:
+        with self._pool.connection() as conn:
+            return conn.execute(
+                "UPDATE spendgate_outbox SET dead = false, attempts = 0, next_attempt_at = 0, "
+                "locked_until = 0 WHERE dead AND (%s::text[] IS NULL OR id = ANY(%s))",
+                (event_ids, event_ids)).rowcount
 
     def outbox_stats(self) -> dict[str, int]:
         with self._pool.connection() as conn:

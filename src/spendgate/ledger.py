@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Callable, Protocol
 
@@ -122,9 +122,24 @@ class LedgerStore(Protocol):
     def outbox_stats(self) -> dict[str, int]:
         """Counts of ``pending`` and ``dead`` events."""
 
+    def dead_events(self, limit: int = 100) -> list[tuple[OutboxItem, str | None]]:
+        """Events that will not be retried, oldest first, each with its last error."""
+
+    def retry_dead(self, event_ids: list[str] | None = None) -> int:
+        """Put dead events (all of them, or the given IDs) back in the queue
+        with a fresh set of attempts. Returns how many were revived."""
+
     def release(self, reservation_id: str) -> None: ...
 
+    def extend(self, reservation_id: str, ttl_seconds: float) -> bool:
+        """Push a live hold's expiry to ``ttl_seconds`` from now. Returns
+        False if the hold is gone (settled, released or already expired)."""
+
     def sweep(self) -> int: ...
+
+    def prune(self, older_than_seconds: float) -> int:
+        """Delete records of reservations settled or expired longer ago than
+        this. Returns how many were deleted. Budgets and spend are unaffected."""
 
     def status(self, tenant: str, feature: str | None = None) -> list[BudgetStatus]: ...
 
@@ -321,10 +336,24 @@ class InMemoryStore:
                 return
             self._unhold(held)
 
+    def extend(self, reservation_id: str, ttl_seconds: float) -> bool:
+        with self._lock:
+            now = self._clock()
+            self._expire_due(now)
+            held = self._held.get(reservation_id)
+            if held is None:
+                return False
+            held.reservation = replace(held.reservation, expires_at=now + ttl_seconds)
+            heapq.heappush(self._expiries, _Expiry(now + ttl_seconds, reservation_id))
+            return True
+
     def sweep(self) -> int:
         """Expire overdue reservations now. Returns how many were expired."""
         with self._lock:
             return self._expire_due(self._clock())
+
+    def prune(self, older_than_seconds: float) -> int:
+        return 0  # this store's history is already bounded
 
     # -- outbox (in memory: lost on restart, like the budgets) -------------
 
@@ -360,6 +389,23 @@ class InMemoryStore:
         with self._lock:
             dead = sum(q.dead for q in self._outbox.values())
             return {"pending": len(self._outbox) - dead, "dead": dead}
+
+    def dead_events(self, limit: int = 100) -> list[tuple[OutboxItem, str | None]]:
+        with self._lock:
+            dead = sorted((q.seq, key) for key, q in self._outbox.items() if q.dead)
+            return [(OutboxItem(key, self._outbox[key].payload, self._outbox[key].delivered,
+                                self._outbox[key].attempts), self._outbox[key].error)
+                    for _, key in dead[:limit]]
+
+    def retry_dead(self, event_ids: list[str] | None = None) -> int:
+        with self._lock:
+            revived = 0
+            for key, queued in self._outbox.items():
+                if queued.dead and (event_ids is None or key in event_ids):
+                    queued.dead, queued.attempts = False, 0
+                    queued.next_attempt_at = queued.locked_until = 0.0
+                    revived += 1
+            return revived
 
     # -- inspection -------------------------------------------------------
 
@@ -404,9 +450,12 @@ class InMemoryStore:
         count = 0
         while self._expiries and self._expiries[0].at <= now:
             due = heapq.heappop(self._expiries)
-            held = self._held.pop(due.reservation_id, None)
+            held = self._held.get(due.reservation_id)
             if held is None:  # already settled or released
                 continue
+            if held.reservation.expires_at > now:  # extended since this entry
+                continue
+            del self._held[due.reservation_id]
             self._unhold(held)
             self._remember(self._expired, due.reservation_id, held)
             count += 1

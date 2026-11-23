@@ -202,6 +202,8 @@ Dispatcher(store, [
   meter tokens or anything else. Tenants with no Stripe customer are skipped.
 - Several dispatchers can run against one database without delivering an
   event twice between them.
+- `store.dead_events()` lists dead events with their last error, and
+  `store.retry_dead()` puts them back in the queue once the cause is fixed.
 - Writing your own sink takes a `name` and a `send(event)` method.
 
 ## Example: a multi-tenant chat API
@@ -252,14 +254,13 @@ remote database adds two network round trips per call to these figures.
   for tests, but not shared between workers and lost on restart.
 - Streaming covers `create(stream=True)` on the three supported APIs. The
   Anthropic `client.messages.stream()` helper is not wrapped.
-- A stream that runs longer than `reservation_ttl` (10 minutes by default)
-  loses its hold while still running. Its cost is still booked when it ends,
-  but other calls may have been admitted against that budget in the meantime.
-  Raise `reservation_ttl` if you run long streams.
+- A running stream renews its hold while events keep arriving, so it can
+  outlive `reservation_ttl`. A stream that goes silent for longer than the
+  TTL loses its hold; its cost is still booked when it ends.
 - Each metered call on PostgreSQL costs two transactions (reserve, settle).
-  Settled reservations are kept in `spendgate_reservations` and are not pruned.
-- There is no command or API yet for retrying dead events; they stay in the
-  `spendgate_outbox` table with their last error.
+  Settled reservations are kept in `spendgate_reservations` until you call
+  `store.prune(older_than_seconds=...)`; schedule that yourself. Keep at least
+  a day, since a kept record is what makes a repeated settle harmless.
 - Prompt size is estimated offline at one token per 3 bytes, which leans high.
   `Guard(count_tokens="api")` uses Anthropic's token-counting endpoint for an
   exact figure at the price of one extra request; OpenAI calls always use the

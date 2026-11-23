@@ -276,3 +276,23 @@ def test_outbox_to_http_sink_end_to_end(guard, store, clock, receiver):
     assert dispatcher.run_once() == 1
     ids = [json.loads(r["body"])["id"] for r in receiver.requests]
     assert ids == [event.id, event.id]  # same ID both times: the receiver can deduplicate
+
+
+def test_dead_events_can_be_inspected_and_retried(guard, store, clock):
+    first, second = make_call(guard), make_call(guard)
+    broken = ListSink(fail=[PermanentDeliveryError("HTTP 400: no such meter")] * 2)
+    Dispatcher(store, [broken], clock=clock).run_once()
+
+    dead = store.dead_events()
+    assert [item.id for item, _ in dead] == [first.id, second.id]
+    assert "no such meter" in dead[0][1]
+
+    assert store.retry_dead([first.id]) == 1  # the meter has been created since
+    fixed = ListSink()
+    assert Dispatcher(store, [fixed], clock=clock).run_once() == 1
+    assert fixed.got == [first]
+    assert store.outbox_stats() == {"pending": 0, "dead": 1}
+
+    assert store.retry_dead() == 1
+    Dispatcher(store, [fixed], clock=clock).run_once()
+    assert fixed.got == [first, second] and store.dead_events() == []

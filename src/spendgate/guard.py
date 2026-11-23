@@ -383,6 +383,9 @@ class _MeteredBase:
         self._stream = stream
         self._tracker = tracker
         self._settled = False
+        # A stream can outlive the reservation TTL. While events keep
+        # arriving, the hold is renewed every half TTL so it stays counted.
+        self._renew_at = guard._clock() + guard.reservation_ttl / 2
         #: The ``UsageEvent`` for this call, once the stream has been settled.
         self.usage_event: UsageEvent | None = None
 
@@ -392,6 +395,19 @@ class _MeteredBase:
         except Exception:  # never let metering break the caller's stream
             log.exception("could not read a stream event for metering")
             return True
+
+    def _renewal_due(self) -> bool:
+        guard = self._guard
+        if self._settled or guard._clock() < self._renew_at:
+            return False
+        self._renew_at = guard._clock() + guard.reservation_ttl / 2
+        return True
+
+    def _renew(self) -> None:
+        try:
+            self._guard.store.extend(self._reservation.id, self._guard.reservation_ttl)
+        except Exception:  # a failed renewal must not break the caller's stream
+            log.exception("could not renew the hold of a running stream")
 
     def _settle(self) -> None:
         if self._settled:
@@ -423,6 +439,8 @@ class MeteredStream(_MeteredBase):
             except BaseException:  # includes StopIteration: the stream is over
                 self._settle()
                 raise
+            if self._renewal_due():
+                self._renew()
             if self._observe(item):
                 return item
 
@@ -463,6 +481,8 @@ class AsyncMeteredStream(_MeteredBase):
             except BaseException:  # includes StopAsyncIteration and cancellation
                 await self._asettle()
                 raise
+            if self._renewal_due():
+                await self._guard._off_loop(self._renew)
             if self._observe(item):
                 return item
 

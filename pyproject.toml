@@ -23,6 +23,11 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Repository = "https://github.com/Maherimtiyaz/spendgate"
+Issues = "https://github.com/Maherimtiyaz/spendgate/issues"
+Changelog = "https://github.com/Maherimtiyaz/spendgate/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 openai = ["openai>=1.40"]
 anthropic = ["anthropic>=0.40"]

@@ -197,3 +197,41 @@ def test_sweeper_thread_expires_holds_in_the_background(store, clock):
     store.sweep = sweep
     with Sweeper(store, interval=0.01):
         assert swept.wait(5)
+
+
+def test_extended_hold_outlives_its_original_ttl(store, clock):
+    r = store.reserve("acme", None, 1000, ttl_seconds=60)
+    clock.now += 50
+    assert store.extend(r.id, 60)
+    clock.now += 50  # 100s after reserving: past the original TTL, inside the new one
+    assert store.sweep() == 0
+    assert month(store).reserved_micros == 1000
+    clock.now += 11
+    assert store.sweep() == 1
+    assert month(store).reserved_micros == 0
+
+
+def test_extend_reports_a_hold_that_is_already_gone(store, clock):
+    expired = store.reserve("acme", None, 100, ttl_seconds=60)
+    settled = store.reserve("acme", None, 100, ttl_seconds=600)
+    store.settle(settled.id, 50)
+    clock.now += 61
+    assert not store.extend(expired.id, 60)
+    assert not store.extend(settled.id, 60)
+    assert not store.extend("nope", 60)
+    assert month(store).reserved_micros == 0
+
+
+def test_prune_removes_old_records_without_touching_spend(store, clock):
+    old = store.reserve("acme", None, 100, ttl_seconds=60)
+    store.settle(old.id, 80)
+    clock.now += 3600
+    recent = store.reserve("acme", None, 100, ttl_seconds=60)
+    store.settle(recent.id, 70)
+    live = store.reserve("acme", None, 100, ttl_seconds=60)
+
+    removed = store.prune(older_than_seconds=600)
+    assert removed in (0, 1)  # the in-memory store keeps no unbounded history
+    assert month(store).spent_micros == 150 and month(store).reserved_micros == 100
+    assert not store.settle(recent.id, 70).applied  # still known: no double booking
+    assert store.settle(live.id, 10).applied

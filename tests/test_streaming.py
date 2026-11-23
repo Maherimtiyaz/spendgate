@@ -188,3 +188,17 @@ def test_stream_wrapper_exposes_the_sdk_stream_attributes(guard):
     stream = guard.chat(c["openai"], tenant="acme", model="gpt-5.4", messages=MSG, stream=True)
     assert stream.response.status_code == 200
     stream.close()
+
+
+def test_long_running_stream_keeps_its_hold_past_the_ttl(clock):
+    guard = Guard(clock=clock, reservation_ttl=60)
+    guard.set_budget("acme", monthly_usd=1)
+    _, c = clients({"/v1/messages": anthropic_stream(text=["a"] * 20)})
+    stream = guard.chat(c["anthropic"], tenant="acme", model="claude-opus-5-5",
+                        max_tokens=500, messages=MSG, stream=True)
+    held = month(guard).reserved_micros
+    for _ in stream:
+        clock.now += 20  # 26 events, 20s apart: over eight minutes in all
+        if not stream.usage_event:
+            assert month(guard).reserved_micros == held  # never silently dropped
+    assert month(guard).reserved_micros == 0 and not stream.usage_event.estimated
