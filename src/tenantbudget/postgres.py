@@ -1,6 +1,6 @@
 """PostgreSQL ledger: budgets shared by every worker, surviving restarts.
 
-Requires ``psycopg`` 3 with its connection pool: ``pip install "spendgate[postgres]"``.
+Requires ``psycopg`` 3 with its connection pool: ``pip install "tenantbudget[postgres]"``.
 
 Atomicity comes from the database. Reserving against a budget is one
 conditional upsert that only succeeds while ``spent + reserved + amount``
@@ -26,7 +26,7 @@ from .ledger import (WINDOWS, BudgetKey, BudgetStatus, OutboxItem, Reservation,
                      SettleResult, period_for)
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS spendgate_budgets (
+CREATE TABLE IF NOT EXISTS tenantbudget_budgets (
     tenant            text   NOT NULL,
     feature           text   NOT NULL DEFAULT '',
     win               text   NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS spendgate_budgets (
     soft_limit_micros bigint,
     PRIMARY KEY (tenant, feature, win)
 );
-CREATE TABLE IF NOT EXISTS spendgate_periods (
+CREATE TABLE IF NOT EXISTS tenantbudget_periods (
     tenant          text    NOT NULL,
     feature         text    NOT NULL,
     win             text    NOT NULL,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS spendgate_periods (
     soft_fired      boolean NOT NULL DEFAULT false,
     PRIMARY KEY (tenant, feature, win, period)
 );
-CREATE TABLE IF NOT EXISTS spendgate_reservations (
+CREATE TABLE IF NOT EXISTS tenantbudget_reservations (
     id            text             PRIMARY KEY,
     tenant        text             NOT NULL,
     feature       text             NOT NULL,
@@ -56,9 +56,9 @@ CREATE TABLE IF NOT EXISTS spendgate_reservations (
     expires_at    double precision NOT NULL,
     settled_at    double precision
 );
-CREATE INDEX IF NOT EXISTS spendgate_reservations_due
-    ON spendgate_reservations (expires_at) WHERE status = 'held';
-CREATE TABLE IF NOT EXISTS spendgate_outbox (
+CREATE INDEX IF NOT EXISTS tenantbudget_reservations_due
+    ON tenantbudget_reservations (expires_at) WHERE status = 'held';
+CREATE TABLE IF NOT EXISTS tenantbudget_outbox (
     id              text             PRIMARY KEY,  -- the usage event id
     seq             bigserial        NOT NULL,
     payload         jsonb            NOT NULL,
@@ -69,14 +69,14 @@ CREATE TABLE IF NOT EXISTS spendgate_outbox (
     dead            boolean          NOT NULL DEFAULT false,
     last_error      text
 );
-CREATE INDEX IF NOT EXISTS spendgate_outbox_due
-    ON spendgate_outbox (next_attempt_at) WHERE NOT dead;
+CREATE INDEX IF NOT EXISTS tenantbudget_outbox_due
+    ON tenantbudget_outbox (next_attempt_at) WHERE NOT dead;
 """
 
 # Insert the period row holding `amount`, or add `amount` to the existing row,
 # but only while the budget still has room. No returned row means refused.
 _HOLD = """
-INSERT INTO spendgate_periods AS p (tenant, feature, win, period, reserved_micros)
+INSERT INTO tenantbudget_periods AS p (tenant, feature, win, period, reserved_micros)
 SELECT %(tenant)s, %(feature)s, %(win)s, %(period)s, %(amount)s
  WHERE %(amount)s <= %(limit)s
 ON CONFLICT (tenant, feature, win, period) DO UPDATE
@@ -85,7 +85,7 @@ ON CONFLICT (tenant, feature, win, period) DO UPDATE
 RETURNING 1
 """
 
-_PERIOD = ("SELECT spent_micros, reserved_micros FROM spendgate_periods "
+_PERIOD = ("SELECT spent_micros, reserved_micros FROM tenantbudget_periods "
            "WHERE tenant = %s AND feature = %s AND win = %s AND period = %s")
 
 
@@ -129,7 +129,7 @@ class PostgresStore:
             raise ValueError("budget limit must not be negative")
         with self._pool.connection() as conn:
             conn.execute(
-                "INSERT INTO spendgate_budgets (tenant, feature, win, limit_micros, soft_limit_micros) "
+                "INSERT INTO tenantbudget_budgets (tenant, feature, win, limit_micros, soft_limit_micros) "
                 "VALUES (%s, %s, %s, %s, %s) "
                 "ON CONFLICT (tenant, feature, win) DO UPDATE SET "
                 "limit_micros = EXCLUDED.limit_micros, soft_limit_micros = EXCLUDED.soft_limit_micros",
@@ -138,7 +138,7 @@ class PostgresStore:
     def remove_budget(self, key: BudgetKey) -> None:
         with self._pool.connection() as conn:
             conn.execute(
-                "DELETE FROM spendgate_budgets WHERE tenant = %s AND feature = %s AND win = %s",
+                "DELETE FROM tenantbudget_budgets WHERE tenant = %s AND feature = %s AND win = %s",
                 (key.tenant, key.feature or "", key.window))
 
     # -- reserve / settle / release ---------------------------------------
@@ -170,7 +170,7 @@ class PostgresStore:
         features = [""] if reservation.feature is None else ["", reservation.feature]
         with conn.transaction():
             budgets = conn.execute(
-                "SELECT feature, win, limit_micros FROM spendgate_budgets "
+                "SELECT feature, win, limit_micros FROM tenantbudget_budgets "
                 "WHERE tenant = %s AND feature = ANY(%s) ORDER BY feature, win",
                 (tenant, features)).fetchall()
             entries = []
@@ -188,7 +188,7 @@ class PostgresStore:
                                    reserved_micros=reserved, requested_micros=amount)
                 entries.append([feature, win, period])
             conn.execute(
-                "INSERT INTO spendgate_reservations "
+                "INSERT INTO tenantbudget_reservations "
                 "(id, tenant, feature, amount_micros, status, entries, created_at, expires_at) "
                 "VALUES (%s, %s, %s, %s, 'held', %s, %s, %s)",
                 (reservation.id, tenant, reservation.feature or "", amount,
@@ -201,7 +201,7 @@ class PostgresStore:
         with self._pool.connection() as conn, conn.transaction():
             row = conn.execute(
                 "SELECT tenant, amount_micros, status, actual_micros, entries "
-                "FROM spendgate_reservations WHERE id = %s FOR UPDATE",
+                "FROM tenantbudget_reservations WHERE id = %s FOR UPDATE",
                 (reservation_id,)).fetchone()
             if row is None:
                 raise KeyError(f"unknown reservation {reservation_id!r}")
@@ -213,12 +213,12 @@ class PostgresStore:
             crossed = []
             for feature, win, period in sorted(entries):
                 conn.execute(
-                    "UPDATE spendgate_periods SET spent_micros = spent_micros + %s, "
+                    "UPDATE tenantbudget_periods SET spent_micros = spent_micros + %s, "
                     "reserved_micros = reserved_micros - %s "
                     "WHERE tenant = %s AND feature = %s AND win = %s AND period = %s",
                     (actual_micros, unhold, tenant, feature, win, period))
                 soft = conn.execute(
-                    "UPDATE spendgate_periods p SET soft_fired = true FROM spendgate_budgets b "
+                    "UPDATE tenantbudget_periods p SET soft_fired = true FROM tenantbudget_budgets b "
                     "WHERE b.tenant = p.tenant AND b.feature = p.feature AND b.win = p.win "
                     "AND p.tenant = %s AND p.feature = %s AND p.win = %s AND p.period = %s "
                     "AND NOT p.soft_fired AND p.spent_micros >= b.soft_limit_micros "
@@ -230,20 +230,20 @@ class PostgresStore:
                         limit_micros=soft[0], soft_limit_micros=soft[1],
                         spent_micros=soft[2], reserved_micros=soft[3]))
             conn.execute(
-                "UPDATE spendgate_reservations SET status = 'settled', actual_micros = %s, "
+                "UPDATE tenantbudget_reservations SET status = 'settled', actual_micros = %s, "
                 "settled_at = %s WHERE id = %s",
                 (actual_micros, self._clock(), reservation_id))
             if event is not None:
                 # Same transaction as the booking: a cost is never booked
                 # without its event, and never the other way round.
-                conn.execute("INSERT INTO spendgate_outbox (id, payload) VALUES (%s, %s)",
+                conn.execute("INSERT INTO tenantbudget_outbox (id, payload) VALUES (%s, %s)",
                              (reservation_id, Jsonb(event)))
             return SettleResult(actual_micros, amount, applied=True, soft_crossed=tuple(crossed))
 
     def release(self, reservation_id: str) -> None:
         with self._pool.connection() as conn, conn.transaction():
             row = conn.execute(
-                "SELECT tenant, amount_micros, status, entries FROM spendgate_reservations "
+                "SELECT tenant, amount_micros, status, entries FROM tenantbudget_reservations "
                 "WHERE id = %s FOR UPDATE", (reservation_id,)).fetchone()
             if row is None or row[2] == "settled":
                 return
@@ -251,15 +251,15 @@ class PostgresStore:
             if status == "held":
                 for feature, win, period in sorted(entries):
                     conn.execute(
-                        "UPDATE spendgate_periods SET reserved_micros = reserved_micros - %s "
+                        "UPDATE tenantbudget_periods SET reserved_micros = reserved_micros - %s "
                         "WHERE tenant = %s AND feature = %s AND win = %s AND period = %s",
                         (amount, tenant, feature, win, period))
-            conn.execute("DELETE FROM spendgate_reservations WHERE id = %s", (reservation_id,))
+            conn.execute("DELETE FROM tenantbudget_reservations WHERE id = %s", (reservation_id,))
 
     def extend(self, reservation_id: str, ttl_seconds: float) -> bool:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "UPDATE spendgate_reservations SET expires_at = %s "
+                "UPDATE tenantbudget_reservations SET expires_at = %s "
                 "WHERE id = %s AND status = 'held' AND expires_at > %s RETURNING 1",
                 (self._clock() + ttl_seconds, reservation_id, self._clock())).fetchone()
         return row is not None
@@ -268,7 +268,7 @@ class PostgresStore:
         cutoff = self._clock() - older_than_seconds
         with self._pool.connection() as conn:
             return conn.execute(
-                "DELETE FROM spendgate_reservations WHERE "
+                "DELETE FROM tenantbudget_reservations WHERE "
                 "(status = 'settled' AND settled_at < %s) OR "
                 "(status = 'expired' AND expires_at < %s)", (cutoff, cutoff)).rowcount
 
@@ -282,7 +282,7 @@ class PostgresStore:
             # SKIP LOCKED lets several sweepers run without waiting on, or
             # double-expiring, each other's rows.
             due = conn.execute(
-                "SELECT id, tenant, amount_micros, entries FROM spendgate_reservations "
+                "SELECT id, tenant, amount_micros, entries FROM tenantbudget_reservations "
                 "WHERE status = 'held' AND expires_at <= %s "
                 "AND (%s::text IS NULL OR tenant = %s) ORDER BY id FOR UPDATE SKIP LOCKED",
                 (now, tenant, tenant)).fetchall()
@@ -294,11 +294,11 @@ class PostgresStore:
                     give_back[(owner, feature, win, period)] += amount
             for key in sorted(give_back):
                 conn.execute(
-                    "UPDATE spendgate_periods SET reserved_micros = reserved_micros - %s "
+                    "UPDATE tenantbudget_periods SET reserved_micros = reserved_micros - %s "
                     "WHERE tenant = %s AND feature = %s AND win = %s AND period = %s",
                     (give_back[key], *key))
             conn.execute(
-                "UPDATE spendgate_reservations SET status = 'expired' WHERE id = ANY(%s)",
+                "UPDATE tenantbudget_reservations SET status = 'expired' WHERE id = ANY(%s)",
                 ([row[0] for row in due],))
             return len(due)
 
@@ -310,8 +310,8 @@ class PostgresStore:
             # SKIP LOCKED: several dispatchers can run without taking the
             # same events. The lease covers a dispatcher dying mid-delivery.
             rows = conn.execute(
-                "UPDATE spendgate_outbox SET attempts = attempts + 1, locked_until = %(lease)s "
-                "WHERE id IN (SELECT id FROM spendgate_outbox WHERE NOT dead "
+                "UPDATE tenantbudget_outbox SET attempts = attempts + 1, locked_until = %(lease)s "
+                "WHERE id IN (SELECT id FROM tenantbudget_outbox WHERE NOT dead "
                 "AND next_attempt_at <= %(now)s AND locked_until <= %(now)s "
                 "ORDER BY seq LIMIT %(limit)s FOR UPDATE SKIP LOCKED) "
                 "RETURNING seq, id, payload, delivered, attempts",
@@ -324,17 +324,17 @@ class PostgresStore:
                      retry_at: float | None = None) -> None:
         with self._pool.connection() as conn:
             if done:
-                conn.execute("DELETE FROM spendgate_outbox WHERE id = %s", (event_id,))
+                conn.execute("DELETE FROM tenantbudget_outbox WHERE id = %s", (event_id,))
                 return
             conn.execute(
-                "UPDATE spendgate_outbox SET delivered = %s, dead = %s, last_error = %s, "
+                "UPDATE tenantbudget_outbox SET delivered = %s, dead = %s, last_error = %s, "
                 "locked_until = 0, next_attempt_at = COALESCE(%s, next_attempt_at) WHERE id = %s",
                 (list(delivered), dead, error, retry_at, event_id))
 
     def dead_events(self, limit: int = 100) -> list[tuple[OutboxItem, str | None]]:
         with self._pool.connection() as conn:
             rows = conn.execute(
-                "SELECT id, payload, delivered, attempts, last_error FROM spendgate_outbox "
+                "SELECT id, payload, delivered, attempts, last_error FROM tenantbudget_outbox "
                 "WHERE dead ORDER BY seq LIMIT %s", (limit,)).fetchall()
         return [(OutboxItem(id, payload, tuple(delivered), attempts), error)
                 for id, payload, delivered, attempts, error in rows]
@@ -342,14 +342,14 @@ class PostgresStore:
     def retry_dead(self, event_ids: list[str] | None = None) -> int:
         with self._pool.connection() as conn:
             return conn.execute(
-                "UPDATE spendgate_outbox SET dead = false, attempts = 0, next_attempt_at = 0, "
+                "UPDATE tenantbudget_outbox SET dead = false, attempts = 0, next_attempt_at = 0, "
                 "locked_until = 0 WHERE dead AND (%s::text[] IS NULL OR id = ANY(%s))",
                 (event_ids, event_ids)).rowcount
 
     def outbox_stats(self) -> dict[str, int]:
         with self._pool.connection() as conn:
             dead, total = conn.execute(
-                "SELECT count(*) FILTER (WHERE dead), count(*) FROM spendgate_outbox").fetchone()
+                "SELECT count(*) FILTER (WHERE dead), count(*) FROM tenantbudget_outbox").fetchone()
         return {"pending": total - dead, "dead": dead}
 
     # -- inspection -------------------------------------------------------
@@ -360,7 +360,7 @@ class PostgresStore:
             self._expire_due(conn, now, tenant)
             budgets = {
                 win: (limit, soft) for win, limit, soft in conn.execute(
-                    "SELECT win, limit_micros, soft_limit_micros FROM spendgate_budgets "
+                    "SELECT win, limit_micros, soft_limit_micros FROM tenantbudget_budgets "
                     "WHERE tenant = %s AND feature = %s", (tenant, feature or "")).fetchall()}
             out = []
             for window in WINDOWS:

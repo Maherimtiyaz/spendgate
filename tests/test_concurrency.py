@@ -2,7 +2,7 @@
 import asyncio
 
 from helpers import MSG, chat_body, clients
-from spendgate import BudgetExceeded, Guard
+from tenantbudget import BudgetExceeded, Guard
 
 CALLS = 1000
 

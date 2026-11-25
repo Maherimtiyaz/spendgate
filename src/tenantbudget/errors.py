@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 
-class SpendgateError(Exception):
+class TenantBudgetError(Exception):
     """Base class for every error this library raises."""
 
 
-class UnknownModelError(SpendgateError):
+class UnknownModelError(TenantBudgetError):
     """No price is registered for the model, so its cost cannot be bounded."""
 
     def __init__(self, model: str):
@@ -15,7 +15,7 @@ class UnknownModelError(SpendgateError):
         self.model = model
 
 
-class BudgetExceeded(SpendgateError):
+class BudgetExceeded(TenantBudgetError):
     """The call was refused: its worst-case cost does not fit in a budget."""
 
     def __init__(self, *, tenant, feature, window, period, limit_micros,
@@ -41,7 +41,7 @@ class BudgetExceeded(SpendgateError):
         return max(self.limit_micros - self.spent_micros - self.reserved_micros, 0)
 
 
-class RunLimitExceeded(SpendgateError):
+class RunLimitExceeded(TenantBudgetError):
     """An agent run hit its own ceiling. ``kind`` is ``"cost"`` or ``"steps"``."""
 
     def __init__(self, *, run_id: str, kind: str, limit, used, requested=None):
@@ -59,7 +59,7 @@ class RunLimitExceeded(SpendgateError):
         super().__init__(message)
 
 
-class LoopDetected(SpendgateError):
+class LoopDetected(TenantBudgetError):
     """The model asked for the same tool call, with the same arguments, too
     many times in a row of recent calls. ``response`` is the response that
     tripped the breaker, when the call was not streamed."""
@@ -75,7 +75,7 @@ class LoopDetected(SpendgateError):
             f"with identical arguments")
 
 
-class DeliveryError(SpendgateError):
+class DeliveryError(TenantBudgetError):
     """A usage event could not be delivered to a sink; it will be retried."""
 
 

@@ -17,10 +17,10 @@ from .ledger import (BudgetKey, BudgetStatus, InMemoryStore, LedgerStore,
 from .money import usd_to_micros
 from .pricing import PriceRegistry, Usage
 
-log = logging.getLogger("spendgate")
+log = logging.getLogger("tenantbudget")
 
 _last_event: contextvars.ContextVar["UsageEvent | None"] = contextvars.ContextVar(
-    "spendgate_last_event", default=None)
+    "tenantbudget_last_event", default=None)
 
 
 @dataclass(frozen=True)
@@ -372,7 +372,7 @@ class Guard:
         try:
             callback(payload)
         except Exception:
-            log.exception("spendgate callback %r failed", callback)
+            log.exception("tenantbudget callback %r failed", callback)
 
 
 class _MeteredBase:

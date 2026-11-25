@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from helpers import MSG, anthropic_body, clients
-from spendgate import (CloudEventsSink, Dispatcher, Guard, PermanentDeliveryError,
+from tenantbudget import (CloudEventsSink, Dispatcher, Guard, PermanentDeliveryError,
                        StripeMeterSink, Usage, UsageEvent)
 
 
@@ -216,7 +216,7 @@ def test_cloudevents_sink_sends_a_valid_cloudevent(receiver):
     assert request["headers"]["Authorization"] == "Bearer om-key"
     assert {k: doc[k] for k in ("specversion", "id", "source", "type", "subject", "time")} == {
         "specversion": "1.0", "id": "e" * 32, "source": "billing-svc",
-        "type": "spendgate.usage", "subject": "acme", "time": "2027-01-15T08:00:00.250Z"}
+        "type": "tenantbudget.usage", "subject": "acme", "time": "2027-01-15T08:00:00.250Z"}
     assert doc["data"]["cost_micros"] == 3763 and doc["data"]["cost_usd"] == "0.003763"
     assert doc["data"]["input_tokens"] == 900 and doc["data"]["run_id"] == "run-1"
 

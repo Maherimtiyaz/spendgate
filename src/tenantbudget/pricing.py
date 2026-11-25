@@ -99,7 +99,7 @@ class PriceRegistry:
 
     @classmethod
     def bundled(cls) -> "PriceRegistry":
-        text = resources.files("spendgate").joinpath("prices.json").read_text("utf-8")
+        text = resources.files("tenantbudget").joinpath("prices.json").read_text("utf-8")
         return cls.from_dict(json.loads(text)["models"])
 
     @classmethod

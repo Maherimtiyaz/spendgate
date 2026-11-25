@@ -1,6 +1,6 @@
 import pytest
 
-from spendgate import PriceRegistry, UnknownModelError, Usage, usd_to_micros
+from tenantbudget import PriceRegistry, UnknownModelError, Usage, usd_to_micros
 
 
 @pytest.fixture

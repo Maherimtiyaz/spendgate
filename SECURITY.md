@@ -16,7 +16,7 @@ attestation tying it to this repository and the tagged commit. To check a
 downloaded file:
 
 ```bash
-gh attestation verify spendgate-0.1.0-py3-none-any.whl --repo Maherimtiyaz/spendgate
+gh attestation verify tenantbudget-0.1.1-py3-none-any.whl --repo Maherimtiyaz/spendgate
 ```
 
 PyPI also shows the attestation on each file's page.

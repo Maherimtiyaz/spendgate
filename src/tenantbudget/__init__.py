@@ -1,6 +1,6 @@
 """Per-tenant LLM spend metering and hard budgets, as a library."""
 from .errors import (BudgetExceeded, DeliveryError, LoopDetected, PermanentDeliveryError,
-                     RunLimitExceeded, SpendgateError, UnknownModelError)
+                     RunLimitExceeded, TenantBudgetError, UnknownModelError)
 from .guard import AsyncMeteredStream, Guard, GuardReservation, MeteredStream, UsageEvent
 from .ledger import BudgetKey, BudgetStatus, InMemoryStore, LedgerStore, Sweeper
 from .outbox import Dispatcher
@@ -9,13 +9,13 @@ from .pricing import ModelPrice, PriceRegistry, Usage
 from .run import Run
 from .sinks import CloudEventsSink, StripeMeterSink
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "Guard", "GuardReservation", "UsageEvent", "MeteredStream", "AsyncMeteredStream",
     "Run", "RunLimitExceeded", "LoopDetected",
     "Dispatcher", "CloudEventsSink", "StripeMeterSink", "DeliveryError", "PermanentDeliveryError",
-    "BudgetExceeded", "SpendgateError", "UnknownModelError",
+    "BudgetExceeded", "TenantBudgetError", "UnknownModelError",
     "BudgetKey", "BudgetStatus", "InMemoryStore", "LedgerStore", "Sweeper",
     "ModelPrice", "PriceRegistry", "Usage",
     "micros_to_usd", "usd_to_micros",

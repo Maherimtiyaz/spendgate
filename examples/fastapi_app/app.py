@@ -2,12 +2,12 @@
 
 Run it without any API key, against a canned model:
 
-    SPENDGATE_DEMO_MOCK=1 uvicorn app:app --factory --app-dir examples/fastapi_app
+    TENANTBUDGET_DEMO_MOCK=1 uvicorn app:app --factory --app-dir examples/fastapi_app
 
 Environment:
 
-    ANTHROPIC_API_KEY     real model calls (not needed with SPENDGATE_DEMO_MOCK=1)
-    SPENDGATE_DSN         PostgreSQL connection string; budgets are kept in
+    ANTHROPIC_API_KEY     real model calls (not needed with TENANTBUDGET_DEMO_MOCK=1)
+    TENANTBUDGET_DSN         PostgreSQL connection string; budgets are kept in
                           memory, per process, if unset
     USAGE_WEBHOOK_URL     POST each usage event there as a CloudEvent (OpenMeter)
     STRIPE_API_KEY        record each usage event as a Stripe meter event ...
@@ -25,11 +25,11 @@ from anthropic import AsyncAnthropic
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from spendgate import (BudgetExceeded, CloudEventsSink, Dispatcher, Guard, InMemoryStore,
+from tenantbudget import (BudgetExceeded, CloudEventsSink, Dispatcher, Guard, InMemoryStore,
                        StripeMeterSink, UsageEvent)
 
-MODEL = os.environ.get("SPENDGATE_DEMO_MODEL", "claude-opus-5-5")
-MAX_TOKENS = int(os.environ.get("SPENDGATE_DEMO_MAX_TOKENS", "2048"))
+MODEL = os.environ.get("TENANTBUDGET_DEMO_MODEL", "claude-opus-5-5")
+MAX_TOKENS = int(os.environ.get("TENANTBUDGET_DEMO_MAX_TOKENS", "2048"))
 
 log = logging.getLogger("uvicorn.error")  # visible in uvicorn's output
 
@@ -45,10 +45,10 @@ class LogSink:
 
 
 def store_from_env():
-    dsn = os.environ.get("SPENDGATE_DSN")
+    dsn = os.environ.get("TENANTBUDGET_DSN")
     if not dsn:
         return InMemoryStore()
-    from spendgate.postgres import PostgresStore
+    from tenantbudget.postgres import PostgresStore
     return PostgresStore(dsn).setup()
 
 
@@ -65,7 +65,7 @@ def sinks_from_env() -> list:
 
 
 def client_from_env() -> AsyncAnthropic:
-    if os.environ.get("SPENDGATE_DEMO_MOCK"):
+    if os.environ.get("TENANTBUDGET_DEMO_MOCK"):
         from mock_provider import mock_client
         return mock_client()
     return AsyncAnthropic()
@@ -97,7 +97,7 @@ def create_app(client: AsyncAnthropic | None = None, store=None, sinks=None,
         yield
         dispatcher.stop()
 
-    app = FastAPI(title="spendgate example", lifespan=lifespan)
+    app = FastAPI(title="tenantbudget example", lifespan=lifespan)
 
     # In a real service the tenant comes from the caller's credentials, and
     # the two /tenants routes are admin-only. Here both are wide open.

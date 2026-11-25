@@ -1,8 +1,10 @@
 # Changelog
 
-## 0.1.0 (2026-11-23)
+## 0.1.1 (2026-11-25)
 
-First version.
+First published version. The project was renamed from `spendgate` to
+`tenantbudget` before release; 0.1.0 was tagged under the old name and never
+published.
 
 - Per-tenant and per-feature budgets (daily, monthly, lifetime) enforced with
   a reserve → call → settle ledger; calls that do not fit are refused before

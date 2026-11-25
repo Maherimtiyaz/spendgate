@@ -2,7 +2,7 @@
 import pytest
 
 from helpers import MSG, clients, sse
-from spendgate import BudgetExceeded, Guard, Usage
+from tenantbudget import BudgetExceeded, Guard, Usage
 
 
 def anthropic_stream(text=("Hel", "lo"), output_tokens=42, finish=True):

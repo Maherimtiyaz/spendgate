@@ -58,7 +58,7 @@ class CloudEventsSink:
     have it".
     """
 
-    def __init__(self, url: str, *, source: str = "spendgate", type: str = "spendgate.usage",
+    def __init__(self, url: str, *, source: str = "tenantbudget", type: str = "tenantbudget.usage",
                  headers: Mapping[str, str] | None = None, name: str = "cloudevents",
                  timeout: float = 10.0):
         self.name = name

@@ -2,7 +2,7 @@
 import pytest
 
 from helpers import MSG, anthropic_body, chat_body, clients, sse
-from spendgate import BudgetExceeded, Guard, LoopDetected, RunLimitExceeded, Usage
+from tenantbudget import BudgetExceeded, Guard, LoopDetected, RunLimitExceeded, Usage
 
 OPUS = {"model": "claude-opus-5-5", "max_tokens": 100, "messages": MSG}
 

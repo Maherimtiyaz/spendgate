@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from spendgate import BudgetExceeded, BudgetKey, Sweeper
+from tenantbudget import BudgetExceeded, BudgetKey, Sweeper
 
 DAY = 86_400
 

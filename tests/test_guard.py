@@ -3,7 +3,7 @@ import anthropic
 import pytest
 
 from helpers import MSG, anthropic_body, chat_body, clients, responses_body
-from spendgate import BudgetExceeded, Guard, UnknownModelError, Usage
+from tenantbudget import BudgetExceeded, Guard, UnknownModelError, Usage
 
 
 def month(guard, tenant="acme"):

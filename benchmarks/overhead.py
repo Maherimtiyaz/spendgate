@@ -1,14 +1,14 @@
-"""How much latency does spendgate add to a model call?
+"""How much latency does tenantbudget add to a model call?
 
     python benchmarks/overhead.py                      # in-memory store
-    SPENDGATE_DSN=postgresql://... python benchmarks/overhead.py
+    TENANTBUDGET_DSN=postgresql://... python benchmarks/overhead.py
 
 Two measurements per store:
 
-* ledger: one reserve + settle pair, which is everything spendgate does around
+* ledger: one reserve + settle pair, which is everything tenantbudget does around
   a call that touches the store.
 * guard.chat: a full metered call through the Anthropic SDK against an
-  in-process mock transport, minus the same call without spendgate. This adds
+  in-process mock transport, minus the same call without tenantbudget. This adds
   the request preparation, token estimate and usage parsing to the ledger time.
 
 The Postgres numbers depend mostly on the round trip to your database.
@@ -25,7 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import anthropic
 
-from spendgate import Guard, InMemoryStore
+from tenantbudget import Guard, InMemoryStore
 
 N = int(os.environ.get("BENCH_N", "3000"))
 MODEL = "claude-opus-5-5"
@@ -88,9 +88,9 @@ def bench(name, store):
 
 def main():
     results = [bench("in-memory", InMemoryStore())]
-    dsn = os.environ.get("SPENDGATE_DSN")
+    dsn = os.environ.get("TENANTBUDGET_DSN")
     if dsn:
-        from spendgate.postgres import PostgresStore
+        from tenantbudget.postgres import PostgresStore
         store = PostgresStore(dsn, max_connections=32).setup()
         results.append(bench("postgres", store))
         store.close()

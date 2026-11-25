@@ -1,20 +1,20 @@
-# spendgate
+# tenantbudget
 
 Per-customer LLM spend limits that actually hold, as a Python library. No
 proxy, no gateway, no runtime dependencies.
 
 If you sell a product built on OpenAI or Anthropic, each customer's usage
-costs you money. spendgate lets you say "this customer may spend $200 a
+costs you money. tenantbudget lets you say "this customer may spend $200 a
 month" and guarantees the calls stop there, even with a thousand requests in
 flight, and gets every call's cost into your billing system.
 
 ```bash
-pip install spendgate
+pip install tenantbudget
 ```
 
 ```python
 from anthropic import Anthropic
-from spendgate import Guard, BudgetExceeded
+from tenantbudget import Guard, BudgetExceeded
 
 guard = Guard(on_usage=lambda e: print(e.tenant, e.model, e.cost_usd))
 guard.set_budget("acme", monthly_usd=200, soft_pct=80)
@@ -116,12 +116,12 @@ print(stream.usage_event.cost_usd)
 ## Sharing budgets between workers: PostgreSQL
 
 ```bash
-pip install "spendgate[postgres]"
+pip install "tenantbudget[postgres]"
 ```
 
 ```python
-from spendgate import Guard, Sweeper
-from spendgate.postgres import PostgresStore
+from tenantbudget import Guard, Sweeper
+from tenantbudget.postgres import PostgresStore
 
 store = PostgresStore("postgresql://user:pass@host/db").setup()  # creates 4 tables
 guard = Guard(store)
@@ -145,7 +145,7 @@ A tenant budget limits the month; a run limits one agent task. Make the run's
 calls through it:
 
 ```python
-from spendgate import LoopDetected, RunLimitExceeded
+from tenantbudget import LoopDetected, RunLimitExceeded
 
 with guard.run("acme", feature="research-agent", max_usd=2.00, max_steps=25) as run:
     while True:
@@ -176,8 +176,8 @@ callback. For billing, turn on the outbox: each usage event is then stored in
 the same transaction that books its cost, and a dispatcher delivers it.
 
 ```python
-from spendgate import CloudEventsSink, Dispatcher, Guard, StripeMeterSink
-from spendgate.postgres import PostgresStore
+from tenantbudget import CloudEventsSink, Dispatcher, Guard, StripeMeterSink
+from tenantbudget.postgres import PostgresStore
 
 store = PostgresStore(dsn).setup()
 guard = Guard(store, outbox=True)
@@ -213,11 +213,11 @@ per-customer budgets, a `402` response when a customer runs out, and usage
 delivered to billing. It runs without an API key against a canned model:
 
 ```bash
-pip install "spendgate[dev]"
+pip install "tenantbudget[dev]"
 ```
 
 ```bash
-SPENDGATE_DEMO_MOCK=1 uvicorn app:app --factory --app-dir examples/fastapi_app
+TENANTBUDGET_DEMO_MOCK=1 uvicorn app:app --factory --app-dir examples/fastapi_app
 ```
 
 ```bash
@@ -229,7 +229,7 @@ curl -X POST localhost:8000/chat -H 'content-type: application/json' -H 'X-Tenan
 ```
 
 The third chat call returns `402` with what is left and what the call needed.
-Set `SPENDGATE_DSN`, `STRIPE_API_KEY` or `USAGE_WEBHOOK_URL` to use PostgreSQL
+Set `TENANTBUDGET_DSN`, `STRIPE_API_KEY` or `USAGE_WEBHOOK_URL` to use PostgreSQL
 and real billing sinks; the file's docstring lists the settings.
 
 ## Overhead
@@ -258,7 +258,7 @@ remote database adds two network round trips per call to these figures.
   outlive `reservation_ttl`. A stream that goes silent for longer than the
   TTL loses its hold; its cost is still booked when it ends.
 - Each metered call on PostgreSQL costs two transactions (reserve, settle).
-  Settled reservations are kept in `spendgate_reservations` until you call
+  Settled reservations are kept in `tenantbudget_reservations` until you call
   `store.prune(older_than_seconds=...)`; schedule that yourself. Keep at least
   a day, since a kept record is what makes a repeated settle harmless.
 - Prompt size is estimated offline at one token per 3 bytes, which leans high.
@@ -287,9 +287,9 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The PostgreSQL tests are skipped unless `SPENDGATE_TEST_DSN` points at a
+The PostgreSQL tests are skipped unless `TENANTBUDGET_TEST_DSN` points at a
 database they may create tables in and truncate:
 
 ```bash
-SPENDGATE_TEST_DSN=postgresql://user:pass@localhost:5432/spendgate_test pytest
+TENANTBUDGET_TEST_DSN=postgresql://user:pass@localhost:5432/tenantbudget_test pytest
 ```

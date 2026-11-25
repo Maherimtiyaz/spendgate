@@ -17,7 +17,7 @@ from .errors import PermanentDeliveryError
 from .guard import UsageEvent
 from .ledger import LedgerStore
 
-log = logging.getLogger("spendgate")
+log = logging.getLogger("tenantbudget")
 
 
 class Sink(Protocol):
@@ -87,7 +87,7 @@ class Dispatcher:
     def start(self) -> "Dispatcher":
         if self._thread is None:
             self._stop.clear()
-            self._thread = threading.Thread(target=self._run, name="spendgate-dispatcher",
+            self._thread = threading.Thread(target=self._run, name="tenantbudget-dispatcher",
                                             daemon=True)
             self._thread.start()
         return self

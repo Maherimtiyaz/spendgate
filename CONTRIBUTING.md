@@ -8,12 +8,12 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The PostgreSQL tests are skipped unless `SPENDGATE_TEST_DSN` points at a
+The PostgreSQL tests are skipped unless `TENANTBUDGET_TEST_DSN` points at a
 database the tests may create tables in and truncate. Never point it at a
 database you care about.
 
 ```bash
-SPENDGATE_TEST_DSN=postgresql://user:pass@localhost:5432/spendgate_test pytest
+TENANTBUDGET_TEST_DSN=postgresql://user:pass@localhost:5432/tenantbudget_test pytest
 ```
 
 Things worth knowing before you change code:
@@ -27,5 +27,5 @@ Things worth knowing before you change code:
 - **Tests go through the real SDK clients** with the HTTP layer mocked
   (`tests/helpers.py`), so usage parsing is tested against real response
   shapes. Please keep it that way for new providers.
-- **Prices** live in `src/spendgate/prices.json`. A price change needs a link
+- **Prices** live in `src/tenantbudget/prices.json`. A price change needs a link
   to the provider's pricing page in the pull request.

@@ -23,7 +23,7 @@ from typing import Callable, Protocol
 
 from .errors import BudgetExceeded
 
-log = logging.getLogger("spendgate")
+log = logging.getLogger("tenantbudget")
 
 WINDOWS = ("day", "month", "total")
 
@@ -200,7 +200,7 @@ class Sweeper:
     def start(self) -> "Sweeper":
         if self._thread is None:
             self._stop.clear()
-            self._thread = threading.Thread(target=self._run, name="spendgate-sweeper",
+            self._thread = threading.Thread(target=self._run, name="tenantbudget-sweeper",
                                             daemon=True)
             self._thread.start()
         return self
